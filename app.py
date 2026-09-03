@@ -150,10 +150,8 @@ without being unnecessarily verbose.
     return base_context + "\n" + instruction
 
 
-
-
 def call_gemini(prompt: str) -> str:
-    """Call Gemini with automatic retry for temporary 503 errors."""
+    """Call Gemini with robust exponential backoff retry for temporary 503 & rate limits."""
 
     if genai is None:
         raise RuntimeError("google-genai package is not installed.")
@@ -165,24 +163,41 @@ def call_gemini(prompt: str) -> str:
 
     client = genai.Client(api_key=api_key)
 
-    for attempt in range(3):
-        try:
-            response = client.models.generate_content(
-                model="gemini-3.6-flash",
-                contents=prompt,
-            )
+    # List of models to try (primary and fallback)
+    models = ["gemini-2.5-flash", "gemini-1.5-flash"]
+    
+    max_retries = 4
+    base_delay = 3  # seconds
 
-            if not response.text:
-                raise RuntimeError("Gemini returned an empty response.")
+    for model in models:
+        for attempt in range(max_retries):
+            try:
+                response = client.models.generate_content(
+                    model=model,
+                    contents=prompt,
+                )
 
-            return response.text
+                if not response.text:
+                    raise RuntimeError("Gemini returned an empty response.")
 
-        except Exception as exc:
-            if "503" in str(exc) and attempt < 2:
-                time.sleep(5 * (attempt + 1))
-                continue
+                return response.text
 
-            raise RuntimeError(f"Gemini API error: {exc}")
+            except Exception as exc:
+                exc_str = str(exc)
+                is_transient = any(err in exc_str for err in ["503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED", "Overloaded"])
+
+                if is_transient and attempt < max_retries - 1:
+                    sleep_time = base_delay * (2 ** attempt)  # 3s, 6s, 12s, 24s
+                    time.sleep(sleep_time)
+                    continue
+                
+                # If retries exhausted on primary model, switch to fallback model
+                if model != models[-1]:
+                    break
+                
+                raise RuntimeError(f"Gemini API error: {exc}")
+
+    raise RuntimeError("Gemini service is temporarily unavailable. Please try again in a few moments.")
 
 
 # --------------------------------------------------------------------------
