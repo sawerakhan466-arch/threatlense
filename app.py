@@ -241,8 +241,15 @@ with st.sidebar:
     st.caption("🔍 **ThreatLens**")
     st.caption("AI-Powered IOC Security Analyzer")
 
-st.title("🔍 ThreatLens")
-st.caption("AI-Powered IP, Domain & URL Security Analyzer")
+st.markdown(
+    '<h1 style="color:#C11C84;">🔍 ThreatLens</h1>',
+    unsafe_allow_html=True
+)
+
+st.markdown(
+    '<p style="color:#D85A9F; font-size:1.05rem;">AI-Powered IP, Domain & URL Security Analyzer</p>',
+    unsafe_allow_html=True
+)
 
 st.divider()
 
