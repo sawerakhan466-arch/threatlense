@@ -27,8 +27,8 @@ import streamlit as st
 from sources import SOURCES, detect_ioc_type, is_valid_ioc
 
 try:
-    import google.generativeai as genai
-except ImportError:
+    from google import genai
+except ImportError:  # Gemini SDK missing - handled gracefully at call time
     genai = None
 
 
@@ -65,14 +65,12 @@ VERDICT_BG = {
 
 def _get_gemini_api_key() -> str | None:
     api_key = os.environ.get("GEMINI_API_KEY")
-
     if not api_key:
         try:
             if "GEMINI_API_KEY" in st.secrets:
                 api_key = st.secrets["GEMINI_API_KEY"]
         except Exception:
             pass
-
     return api_key
 
 
@@ -87,7 +85,6 @@ def build_gemini_prompt(
     """Build a knowledge-level-specific prompt for Gemini. No secrets included."""
 
     findings_lines = []
-
     for source_name, result in results.items():
         findings_lines.append(
             f"- {source_name}: verdict={result['verdict']}, "
@@ -95,7 +92,6 @@ def build_gemini_prompt(
             f"error={result['error']}, "
             f"raw_data={result['raw_data']}"
         )
-
     findings_block = "\n".join(findings_lines)
 
     base_context = f"""
@@ -133,7 +129,6 @@ sections, and practical advice. Briefly explain what VirusTotal and
 WHOIS are and why they were used. Avoid unnecessary jargon. Clearly
 state that this result is an assessment, not an absolute guarantee.
 """
-
     elif knowledge_level == "Intermediate":
         instruction = """
 Explain the verdict for a user with some cybersecurity familiarity.
@@ -142,8 +137,7 @@ indicators. Explain why the risk score was produced, identify
 important indicators, and provide clear recommended next steps.
 Use moderate technical terminology, briefly explained where useful.
 """
-
-    else:
+    else:  # Expert
         instruction = """
 Provide a concise, technical analysis for an expert audience. Discuss
 detection ratios and source confidence, meaningful IOC indicators,
@@ -157,34 +151,23 @@ without being unnecessarily verbose.
 
 
 def call_gemini(prompt: str) -> str:
-    """Call Gemini and return plain text. Raises on failure."""
-
+    """Call Gemini and return plain text. Raises on failure (caught by caller)."""
     if genai is None:
-        raise RuntimeError(
-            "google-generativeai package is not installed."
-        )
+        raise RuntimeError("google-genai package is not installed.")
 
     api_key = _get_gemini_api_key()
-
     if not api_key:
-        raise RuntimeError(
-            "GEMINI_API_KEY is not configured."
-        )
+        raise RuntimeError("GEMINI_API_KEY is not configured.")
 
-    genai.configure(api_key=api_key)
-
-    # Updated Gemini model
-    model = genai.GenerativeModel("gemini-3.5-flash")
-
-    response = model.generate_content(prompt)
+    client = genai.Client(api_key=api_key)
+    response = client.models.generate_content(
+        model="gemini-3.5-flash",
+        contents=prompt,
+    )
 
     text = getattr(response, "text", None)
-
     if not text:
-        raise RuntimeError(
-            "Gemini returned an empty response."
-        )
-
+        raise RuntimeError("Gemini returned an empty response.")
     return text
 
 
@@ -192,28 +175,20 @@ def call_gemini(prompt: str) -> str:
 # Aggregation helpers
 # --------------------------------------------------------------------------
 
-def compute_overall(
-    results: dict[str, dict[str, Any]]
-) -> tuple[str, int]:
+def compute_overall(results: dict[str, dict[str, Any]]) -> tuple[str, int]:
     """Derive an overall verdict/risk score from all successful source results."""
-
     valid_scores = [
-        r["risk_score"]
-        for r in results.values()
-        if r["verdict"] not in ("ERROR", "UNKNOWN")
+        r["risk_score"] for r in results.values() if r["verdict"] not in ("ERROR", "UNKNOWN")
     ]
 
     if not valid_scores:
         return "UNKNOWN", 0
 
-    overall_risk = int(round(max(valid_scores)))
-
+    overall_risk = int(round(max(valid_scores)))  # most severe source wins
     if overall_risk >= 60:
         overall_verdict = "MALICIOUS"
-
     elif overall_risk >= 30:
         overall_verdict = "SUSPICIOUS"
-
     else:
         overall_verdict = "SAFE"
 
@@ -223,7 +198,6 @@ def compute_overall(
 def render_verdict_badge(verdict: str) -> str:
     color = VERDICT_COLORS.get(verdict, "#6c757d")
     bg = VERDICT_BG.get(verdict, "#eceff1")
-
     return (
         f'<span style="background-color:{bg}; color:{color}; '
         f'padding:4px 12px; border-radius:12px; font-weight:600; '
@@ -231,20 +205,9 @@ def render_verdict_badge(verdict: str) -> str:
     )
 
 
-def sanitize_raw_data(
-    raw_data: dict[str, Any]
-) -> dict[str, Any]:
+def sanitize_raw_data(raw_data: dict[str, Any]) -> dict[str, Any]:
     """Strip any accidental sensitive-looking keys before display."""
-
-    banned_terms = (
-        "key",
-        "token",
-        "auth",
-        "secret",
-        "credential",
-        "password",
-    )
-
+    banned_terms = ("key", "token", "auth", "secret", "credential", "password")
     return {
         k: v
         for k, v in raw_data.items()
@@ -257,157 +220,72 @@ def sanitize_raw_data(
 # --------------------------------------------------------------------------
 
 # --------------------------------------------------------------------------
-# Personal signature — Sawera → "100era"
+# Personal signature — Sawera → "100era" (سو / sau = 100 in Urdu/Hindi)
 # --------------------------------------------------------------------------
 
 with st.sidebar:
-
     st.markdown(
         """
-        <div style="
-            text-align:center;
-            padding:14px 0 22px 0;
-        ">
-
-            <div style="
-                font-size:1.9rem;
-                font-weight:900;
-                letter-spacing:0.8px;
-                color:#c83f70;
-            ">
-                100era
+        <div style="text-align:center; padding: 12px 0 20px 0;">
+            <div style="font-size:1.9rem; font-weight:800; letter-spacing:0.5px;">
+                <span style="color:#c83f70;">100era</span>
             </div>
-
-            <div style="
-                font-size:0.85rem;
-                font-weight:600;
-                color:#c83f70;
-                margin-top:4px;
-            ">
+            <div style="font-size:0.85rem; font-weight:600; color:#c83f70; margin-top:3px;">
                 built &amp; secured by Sawera
             </div>
-
         </div>
-
-        <hr style="
-            margin:0 0 16px 0;
-            opacity:0.15;
-        ">
+        <hr style="margin:0 0 16px 0; opacity:0.15;">
         """,
         unsafe_allow_html=True,
     )
-
     st.caption("🔍 **ThreatLens**")
     st.caption("AI-Powered IOC Security Analyzer")
 
-
-# --------------------------------------------------------------------------
-# Main title
-# --------------------------------------------------------------------------
-
 st.title("🔍 ThreatLens")
-
-st.caption(
-    "AI-Powered IP, Domain & URL Security Analyzer"
-)
+st.caption("AI-Powered IP, Domain & URL Security Analyzer")
 
 st.divider()
 
-
-# --------------------------------------------------------------------------
-# User input
-# --------------------------------------------------------------------------
-
 col1, col2 = st.columns(2)
-
 with col1:
-    ioc_type = st.selectbox(
-        "IOC Type",
-        options=["IP", "Domain", "URL"],
-    )
-
+    ioc_type = st.selectbox("IOC Type", options=["IP", "Domain", "URL"])
 with col2:
     knowledge_level = st.selectbox(
-        "Knowledge Level",
-        options=[
-            "Beginner",
-            "Intermediate",
-            "Expert",
-        ],
+        "Knowledge Level", options=["Beginner", "Intermediate", "Expert"]
     )
-
 
 placeholder_map = {
     "IP": "8.8.8.8",
     "Domain": "example.com",
     "URL": "https://example.com/login",
 }
-
 ioc_input = st.text_input(
-    "Enter IP, domain, or URL",
-    placeholder=placeholder_map[ioc_type],
+    "Enter IP, domain, or URL", placeholder=placeholder_map[ioc_type]
 )
 
-
-analyze_clicked = st.button(
-    "🔎 Analyze IOC",
-    type="primary",
-    use_container_width=True,
-)
-
+analyze_clicked = st.button("🔎 Analyze IOC", type="primary", use_container_width=True)
 
 st.divider()
 
-
-# --------------------------------------------------------------------------
-# Analysis
-# --------------------------------------------------------------------------
-
 if analyze_clicked:
-
     if not ioc_input or not ioc_input.strip():
-
+        st.error("Please enter an IP, domain, or URL to analyze.")
+    elif not is_valid_ioc(ioc_input.strip(), ioc_type):
+        detected = detect_ioc_type(ioc_input.strip())
         st.error(
-            "Please enter an IP, domain, or URL to analyze."
-        )
-
-    elif not is_valid_ioc(
-        ioc_input.strip(),
-        ioc_type,
-    ):
-
-        detected = detect_ioc_type(
-            ioc_input.strip()
-        )
-
-        st.error(
-            f"'{ioc_input}' does not look like a valid "
-            f"{ioc_type}. "
+            f"'{ioc_input}' does not look like a valid {ioc_type}. "
             f"(Detected type: {detected})"
         )
-
     else:
-
         ioc = ioc_input.strip()
 
         # Generic orchestration - no source-specific branching.
         results: dict[str, dict[str, Any]] = {}
-
-        with st.spinner(
-            "Querying intelligence sources..."
-        ):
-
+        with st.spinner("Querying intelligence sources..."):
             for source_name, source_function in SOURCES.items():
-
                 try:
-
-                    results[source_name] = source_function(
-                        ioc,
-                        ioc_type,
-                    )
-
-                except Exception as exc:
-
+                    results[source_name] = source_function(ioc, ioc_type)
+                except Exception as exc:  # absolute safety net
                     results[source_name] = {
                         "source": source_name,
                         "verdict": "ERROR",
@@ -416,184 +294,62 @@ if analyze_clicked:
                         "error": f"Unexpected failure: {exc}",
                     }
 
+        overall_verdict, overall_risk = compute_overall(results)
 
-        overall_verdict, overall_risk = compute_overall(
-            results
-        )
-
-
-        # ------------------------------------------------------------------
-        # Overall summary
-        # ------------------------------------------------------------------
-
+        # ---------------- Overall summary ----------------
         st.subheader("Overall Analysis")
-
         oc1, oc2, oc3 = st.columns(3)
-
-        oc1.metric(
-            "IOC",
-            ioc,
-        )
-
-        oc2.metric(
-            "Type",
-            ioc_type,
-        )
-
+        oc1.metric("IOC", ioc)
+        oc2.metric("Type", ioc_type)
         with oc3:
-
             st.markdown("**Overall Risk**")
-
-            st.markdown(
-                render_verdict_badge(
-                    overall_verdict
-                ),
-                unsafe_allow_html=True,
-            )
-
-            st.caption(
-                f"Score: {overall_risk}/100"
-            )
-
+            st.markdown(render_verdict_badge(overall_verdict), unsafe_allow_html=True)
+            st.caption(f"Score: {overall_risk}/100")
 
         st.divider()
 
-
-        # ------------------------------------------------------------------
-        # Individual source results
-        # ------------------------------------------------------------------
-
+        # ---------------- Individual source results ----------------
         st.subheader("Source Results")
-
         for source_name, result in results.items():
-
             with st.container(border=True):
-
-                sc1, sc2, sc3 = st.columns(
-                    [2, 2, 2]
-                )
-
-                sc1.markdown(
-                    f"**{result['source']}**"
-                )
-
+                sc1, sc2, sc3 = st.columns([2, 2, 2])
+                sc1.markdown(f"**{result['source']}**")
                 with sc2:
-
-                    st.markdown(
-                        render_verdict_badge(
-                            result["verdict"]
-                        ),
-                        unsafe_allow_html=True,
-                    )
-
-                sc3.markdown(
-                    f"Risk Score: "
-                    f"**{result['risk_score']}/100**"
-                )
-
+                    st.markdown(render_verdict_badge(result["verdict"]), unsafe_allow_html=True)
+                sc3.markdown(f"Risk Score: **{result['risk_score']}/100**")
                 if result["error"]:
+                    st.warning(result["error"])
 
-                    st.warning(
-                        result["error"]
-                    )
-
-
-        # ------------------------------------------------------------------
-        # Gemini AI insight
-        # ------------------------------------------------------------------
-
+        # ---------------- Gemini AI insight ----------------
         st.divider()
-
-        st.subheader(
-            "🤖 AI Security Insight"
-        )
+        st.subheader("🤖 AI Security Insight")
 
         prompt = build_gemini_prompt(
-            ioc,
-            ioc_type,
-            knowledge_level,
-            results,
-            overall_verdict,
-            overall_risk,
+            ioc, ioc_type, knowledge_level, results, overall_verdict, overall_risk
         )
 
         try:
-
-            with st.spinner(
-                "Generating AI insight..."
-            ):
-
-                ai_text = call_gemini(
-                    prompt
-                )
-
-            with st.container(
-                border=True
-            ):
-
-                st.caption(
-                    "AI-generated interpretation "
-                    "of the collected source data."
-                )
-
-                st.markdown(
-                    ai_text
-                )
-
+            with st.spinner("Generating AI insight..."):
+                ai_text = call_gemini(prompt)
+            with st.container(border=True):
+                st.caption("AI-generated interpretation of the collected source data.")
+                st.markdown(ai_text)
         except Exception as exc:
+            st.warning("AI insight is currently unavailable.")
+            st.caption(f"Gemini error: {exc}")
 
-            # Show actual Gemini error instead of hiding it.
-            st.warning(
-                "AI insight is currently unavailable."
-            )
-
-            st.caption(
-                f"Gemini error: {exc}"
-            )
-
-
-        # ------------------------------------------------------------------
-        # Raw data
-        # ------------------------------------------------------------------
-
+        # ---------------- Raw data (expandable) ----------------
         st.divider()
-
-        with st.expander(
-            "🔎 View Source Details"
-        ):
-
+        with st.expander("🔎 View Source Details"):
             for source_name, result in results.items():
-
-                st.markdown(
-                    f"**{source_name}**"
-                )
-
-                sanitized = sanitize_raw_data(
-                    result.get(
-                        "raw_data",
-                        {},
-                    )
-                )
-
+                st.markdown(f"**{source_name}**")
+                sanitized = sanitize_raw_data(result.get("raw_data", {}))
                 if sanitized:
-
-                    st.json(
-                        sanitized
-                    )
-
+                    st.json(sanitized)
                 else:
-
-                    st.caption(
-                        "No additional data available."
-                    )
-
-
+                    st.caption("No additional data available.")
 else:
-
-    st.info(
-        "Select an IOC type and knowledge level, "
-        "enter a value, then click Analyze IOC."
-    )
+    st.info("Select an IOC type and knowledge level, enter a value, then click Analyze IOC.")
 
 
 # --------------------------------------------------------------------------
@@ -602,23 +358,9 @@ else:
 
 st.markdown(
     """
-    <div style="
-        text-align:center;
-        padding-top:36px;
-        opacity:0.85;
-        font-size:0.9rem;
-    ">
-
-        Crafted with 🔍 by
-
-        <span style="
-            color:#c83f70;
-            font-weight:800;
-            font-size:1.05rem;
-        ">
-            100era
-        </span>
-
+    <div style="text-align:center; padding-top:32px; opacity:0.85; font-size:0.8rem;">
+        Crafted with 🔍 by 
+        <span style="color:#c83f70; font-size:1.05rem; font-weight:700;">100era</span>
     </div>
     """,
     unsafe_allow_html=True,
