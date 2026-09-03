@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import os
 from typing import Any
-
+import time
 import streamlit as st
 
 from sources import SOURCES, detect_ioc_type, is_valid_ioc
@@ -150,25 +150,39 @@ without being unnecessarily verbose.
     return base_context + "\n" + instruction
 
 
+import time
+
 def call_gemini(prompt: str) -> str:
-    """Call Gemini and return plain text. Raises on failure (caught by caller)."""
+    """Call Gemini with automatic retry for temporary 503 errors."""
+
     if genai is None:
         raise RuntimeError("google-genai package is not installed.")
 
     api_key = _get_gemini_api_key()
+
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY is not configured.")
 
     client = genai.Client(api_key=api_key)
-    response = client.models.generate_content(
-        model="gemini-3.6-flash",
-        contents=prompt,
-    )
 
-    text = getattr(response, "text", None)
-    if not text:
-        raise RuntimeError("Gemini returned an empty response.")
-    return text
+    for attempt in range(3):
+        try:
+            response = client.models.generate_content(
+                model="gemini-3.6-flash",
+                contents=prompt,
+            )
+
+            if not response.text:
+                raise RuntimeError("Gemini returned an empty response.")
+
+            return response.text
+
+        except Exception as exc:
+            if "503" in str(exc) and attempt < 2:
+                time.sleep(5 * (attempt + 1))
+                continue
+
+            raise RuntimeError(f"Gemini API error: {exc}")
 
 
 # --------------------------------------------------------------------------
