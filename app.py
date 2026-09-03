@@ -165,9 +165,8 @@ def call_gemini(prompt: str) -> str:
 
     # Standard model strings for the new google-genai SDK
     models = [
-        "gemini-2.5-flash",
-        "gemini-1.5-flash",
-        "gemini-2.5-pro"
+      
+        "gemini-3.1-pro"
     ]
     
     last_error = ""
