@@ -2,3 +2,4 @@ streamlit
 requests
 python-whois
 google-generativeai
+google-genai
