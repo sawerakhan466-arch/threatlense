@@ -151,7 +151,7 @@ without being unnecessarily verbose.
 
 
 def call_gemini(prompt: str) -> str:
-    """Call Gemini with robust exponential backoff retry for temporary 503 & rate limits."""
+    """Call Gemini with exact model resource paths and backoff retry logic."""
 
     if genai is None:
         raise RuntimeError("google-genai package is not installed.")
@@ -163,11 +163,15 @@ def call_gemini(prompt: str) -> str:
 
     client = genai.Client(api_key=api_key)
 
-    # List of models to try (primary and fallback)
-    models = ["gemini-2.5-flash", "gemini-1.5-flash"]
+    # Updated model identifiers with exact API resource path formatting
+    models = [
+        "models/gemini-2.5-flash",
+        "models/gemini-1.5-flash",
+        "models/gemini-2.5-pro"
+    ]
     
-    max_retries = 4
-    base_delay = 3  # seconds
+    max_retries = 3
+    base_delay = 2  # seconds
 
     for model in models:
         for attempt in range(max_retries):
@@ -184,21 +188,19 @@ def call_gemini(prompt: str) -> str:
 
             except Exception as exc:
                 exc_str = str(exc)
-                is_transient = any(err in exc_str for err in ["503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED", "Overloaded"])
+                is_transient = any(
+                    err in exc_str for err in ["503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED", "Overloaded"]
+                )
 
                 if is_transient and attempt < max_retries - 1:
-                    sleep_time = base_delay * (2 ** attempt)  # 3s, 6s, 12s, 24s
+                    sleep_time = base_delay * (2 ** attempt)
                     time.sleep(sleep_time)
                     continue
                 
-                # If retries exhausted on primary model, switch to fallback model
-                if model != models[-1]:
-                    break
-                
-                raise RuntimeError(f"Gemini API error: {exc}")
+                # Switch to next model if this one fails with 404 or transient error
+                break
 
-    raise RuntimeError("Gemini service is temporarily unavailable. Please try again in a few moments.")
-
+    raise RuntimeError("Gemini API models are currently unavailable. Please verify API key permissions and model availability.")
 
 # --------------------------------------------------------------------------
 # Aggregation helpers
