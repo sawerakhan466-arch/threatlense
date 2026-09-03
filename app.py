@@ -151,7 +151,7 @@ without being unnecessarily verbose.
 
 
 def call_gemini(prompt: str) -> str:
-    """Call Gemini with exact model resource paths and backoff retry logic."""
+    """Call Gemini with clean model strings and detailed error handling."""
 
     if genai is None:
         raise RuntimeError("google-genai package is not installed.")
@@ -163,45 +163,42 @@ def call_gemini(prompt: str) -> str:
 
     client = genai.Client(api_key=api_key)
 
-    # Updated model identifiers with exact API resource path formatting
+    # Standard model strings for the new google-genai SDK
     models = [
-        "models/gemini-2.5-flash",
-        "models/gemini-1.5-flash",
-        "models/gemini-2.5-pro"
+        "gemini-2.5-flash",
+        "gemini-1.5-flash",
+        "gemini-2.5-pro"
     ]
     
-    max_retries = 3
-    base_delay = 2  # seconds
+    last_error = ""
 
-    for model in models:
-        for attempt in range(max_retries):
+    for model_name in models:
+        for attempt in range(3):
             try:
                 response = client.models.generate_content(
-                    model=model,
+                    model=model_name,
                     contents=prompt,
                 )
 
-                if not response.text:
-                    raise RuntimeError("Gemini returned an empty response.")
-
-                return response.text
+                if response and response.text:
+                    return response.text
 
             except Exception as exc:
-                exc_str = str(exc)
+                last_error = str(exc)
+                
+                # Check for transient network/server errors
                 is_transient = any(
-                    err in exc_str for err in ["503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED", "Overloaded"]
+                    err in last_error for err in ["503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED", "Overloaded"]
                 )
 
-                if is_transient and attempt < max_retries - 1:
-                    sleep_time = base_delay * (2 ** attempt)
-                    time.sleep(sleep_time)
+                if is_transient and attempt < 2:
+                    time.sleep(2 * (attempt + 1))
                     continue
                 
-                # Switch to next model if this one fails with 404 or transient error
+                # Move to the next fallback model if 404 or persistent error occurs
                 break
 
-    raise RuntimeError("Gemini API models are currently unavailable. Please verify API key permissions and model availability.")
-
+    raise RuntimeError(f"Could not connect to Gemini API. Last error: {last_error}")
 # --------------------------------------------------------------------------
 # Aggregation helpers
 # --------------------------------------------------------------------------
