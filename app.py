@@ -150,7 +150,7 @@ without being unnecessarily verbose.
     return base_context + "\n" + instruction
 
 
-import time
+
 
 def call_gemini(prompt: str) -> str:
     """Call Gemini with automatic retry for temporary 503 errors."""
